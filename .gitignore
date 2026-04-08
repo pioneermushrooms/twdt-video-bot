@@ -10,3 +10,5 @@ build/
 *.mp4
 *.mp3
 *.wav
+cookies.txt
+www.youtube.com_cookies.*
