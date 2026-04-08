@@ -8,10 +8,42 @@ Two operations:
      `start_s`, then cut it to exactly `length_s` via ffmpeg
 """
 
-import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+
+def _find_cookies_txt() -> Optional[Path]:
+    """Look for a Netscape cookies.txt in standard locations.
+
+    YouTube throttles unauthenticated downloads to ~1 KB/s. Using real
+    browser cookies bypasses the throttle. Export cookies with the
+    'Get cookies.txt LOCALLY' Chrome extension in Netscape format.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    for c in [
+        repo_root / "cookies.txt",
+        Path.home() / ".twdt-video-bot" / "cookies.txt",
+    ]:
+        if c.exists() and c.stat().st_size > 200:  # skip empty/header-only files
+            return c
+    return None
+
+
+def _cookie_args() -> list[str]:
+    """Return yt-dlp --cookies args if a cookies.txt is available."""
+    path = _find_cookies_txt()
+    if path is not None:
+        return ["--cookies", str(path)]
+    return []
+
+
+# YouTube's web/tv clients require a JavaScript runtime to solve the n-sig
+# challenge. node.js is the most common runtime; explicitly pass it so
+# yt-dlp doesn't skip detection when the shell's PATH resolution lags.
+_JS_RUNTIME_ARGS = ["--js-runtimes", "node"]
 
 
 @dataclass
@@ -35,7 +67,9 @@ def list_playlist(playlist_url: str, max_entries: int = 0) -> list[PlaylistEntry
     Returns: ordered list of PlaylistEntry
     """
     cmd = [
-        "python", "-m", "yt_dlp",
+        sys.executable, "-m", "yt_dlp",
+        *_cookie_args(),
+        *_JS_RUNTIME_ARGS,
         "--flat-playlist",
         "--print", "%(id)s|%(title)s|%(duration)s",
         playlist_url,
@@ -87,7 +121,9 @@ def download_clip(
     section = f"*{start_s:.2f}-{end_s:.2f}"
 
     cmd = [
-        "python", "-m", "yt_dlp",
+        sys.executable, "-m", "yt_dlp",
+        *_cookie_args(),
+        *_JS_RUNTIME_ARGS,
         "--download-sections", section,
         "--force-keyframes-at-cuts",  # cleaner cuts at requested boundaries
         "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]",

@@ -78,25 +78,49 @@ def mix_narration(
     video_path: Path,
     narration_mp3: Path,
     output_path: Path,
+    narration_duration_s: float,
     narration_db: float = 0.0,
     background_db: float = -14.0,
 ) -> Path:
     """Overlay narration onto the video's audio track.
 
     Narration plays at full volume, the video's original audio is mixed in
-    at ~20% (-14dB). Output length is clamped to the narration length so the
-    video ends when Crazy Eddie stops talking.
+    at ~20% (-14dB). Output length is **hard-clamped** to
+    `narration_duration_s` via ffmpeg's -t flag — we used to rely on
+    `-stream_loop -1 ... -shortest` but that interacted badly with the
+    amix filter and produced hour-long 450MB files.
 
-    narration_db: adjust narration level (0 = unchanged)
-    background_db: how much to attenuate the source audio (-14 ≈ 20%)
+    If the concatenated video is shorter than the narration, the video
+    is looped via stream_loop and then truncated at narration length.
+    If it's longer, it's truncated directly.
     """
     video_path = Path(video_path)
     narration_mp3 = Path(narration_mp3)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Filter: amix two audio streams with weighted volumes, then take the
-    # shortest duration. Video is trimmed to the audio length via -shortest.
+    # Figure out if we need to loop the video. Probe its duration.
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(video_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    try:
+        video_duration = float(probe.stdout.strip())
+    except ValueError:
+        video_duration = 0.0
+
+    need_loop = video_duration > 0 and video_duration < narration_duration_s - 0.5
+
+    # Filter: amix two audio streams with weighted volumes. duration=first
+    # anchors the mix to the looped-or-trimmed background track; -t later
+    # hard-caps everything to narration length.
     filter_graph = (
         f"[0:a]volume={background_db}dB[bg];"
         f"[1:a]volume={narration_db}dB[narr];"
@@ -104,14 +128,16 @@ def mix_narration(
         "normalize=0[aout]"
     )
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-stream_loop", "-1",  # loop the video in case narration is longer
+    cmd = ["ffmpeg", "-y"]
+    if need_loop:
+        cmd += ["-stream_loop", "-1"]
+    cmd += [
         "-i", str(video_path),
         "-i", str(narration_mp3),
         "-filter_complex", filter_graph,
         "-map", "0:v",
         "-map", "[aout]",
+        "-t", f"{narration_duration_s:.3f}",  # HARD cap — this is the fix
         "-c:v", "libx264",
         "-preset", "medium",
         "-crf", str(CRF),
@@ -119,7 +145,6 @@ def mix_narration(
         "-b:a", "192k",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        "-shortest",  # end when the shortest stream ends (= narration)
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)

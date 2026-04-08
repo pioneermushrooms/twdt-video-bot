@@ -3,7 +3,6 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from twdt_video_bot.compose import concat_clips_to_target, mix_narration
 from twdt_video_bot.forum import load_post
@@ -118,7 +117,7 @@ def build_recap(
 
     # Step 7: overlay narration + final encode
     step("Mixing narration onto clips (final encode)")
-    mix_narration(intermediate, narration_path, output_path)
+    mix_narration(intermediate, narration_path, output_path, narration_duration_s=narration_duration)
 
     total = time.time() - started
     step(f"Done: {output_path} ({total:.0f}s total)")
