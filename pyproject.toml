@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "twdt-video-bot"
+version = "0.1.0"
+description = "Automated TWDT weekly recap videos — forum post + YouTube playlist → narrated highlight MP4"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+    "yt-dlp>=2026.3",
+    "openai>=1.50",         # for the LLM text trimmer (cheap gpt-4o-mini call)
+]
+
+[project.scripts]
+twdt-video-bot = "twdt_video_bot.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/twdt_video_bot"]
