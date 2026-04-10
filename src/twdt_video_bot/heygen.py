@@ -56,7 +56,7 @@ def generate_avatar_video(
     script_text: str,
     avatar_id: str = "",
     voice_id: str = HEYGEN_VOICE_ID,
-    background_color: str = "#00FF00",  # green screen default
+    background_color: str = "#000000",  # black background — blends with game footage
     poll_interval_s: float = 5.0,
     poll_timeout_s: float = 600.0,
 ) -> bytes:
@@ -89,9 +89,7 @@ def generate_avatar_video(
                     "type": "talking_photo",
                     "talking_photo_id": avatar_id,
                     "scale": 1,
-                    "talking_photo_style": "circle",
-                    "talking_style": "stable",
-                    "expression": "default",
+                    "use_avatar_iv_model": True,
                 },
                 "voice": {
                     "type": "text",
