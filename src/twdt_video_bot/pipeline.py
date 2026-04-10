@@ -1,10 +1,19 @@
-"""End-to-end recap pipeline — ties every module together."""
+"""End-to-end recap pipeline — ties every module together.
 
+Two modes:
+  - Avatar mode (default): HeyGen generates a talking-head avatar video with
+    lip-synced ElevenLabs narration. The avatar is overlaid on the bottom-left
+    20% of the game clips, and HeyGen's audio is the primary narration track.
+  - Audio-only mode (--no-avatar): standalone ElevenLabs narration mixed over
+    game clips, no avatar. Faster, cheaper, still sounds good.
+"""
+
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from twdt_video_bot.compose import concat_clips_to_target, mix_narration
+from twdt_video_bot.compose import concat_clips_to_target, mix_narration, overlay_avatar
 from twdt_video_bot.forum import load_post
 from twdt_video_bot.narration import DEFAULT_VOICE_ID, generate_narration
 from twdt_video_bot.playlist import download_clip, list_playlist
@@ -27,6 +36,24 @@ class RecapResult:
     clip_count: int
     clip_length_s: float
     total_seconds: float
+    avatar: bool
+
+
+def _probe_duration(path: Path) -> float:
+    """Use ffprobe to measure a media file's duration in seconds."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
 
 
 def build_recap(
@@ -37,6 +64,7 @@ def build_recap(
     voice_id: str = DEFAULT_VOICE_ID,
     max_playlist: int = MAX_PLAYLIST_ENTRIES,
     clip_start_offset: float = CLIP_START_OFFSET_S,
+    use_avatar: bool = True,
     on_progress=None,
 ) -> RecapResult:
     """Run the full pipeline.
@@ -45,6 +73,8 @@ def build_recap(
     playlist_url: YouTube playlist URL
     output_path: final MP4 path
     cache_dir: directory for temporary clips + intermediate video
+    use_avatar: if True, generate a HeyGen avatar video (default).
+                if False, use standalone ElevenLabs narration only.
     """
     started = time.time()
     output_path = Path(output_path)
@@ -59,7 +89,7 @@ def build_recap(
             except Exception:
                 pass
 
-    # Step 1: fetch & trim the post
+    # ── Step 1: fetch & trim the post ──
     step("Fetching forum post")
     raw_text = load_post(post_source)
     step(f"  raw post: {len(raw_text)} chars")
@@ -68,30 +98,44 @@ def build_recap(
     trimmed = trim_for_tts(raw_text)
     step(f"  trimmed: {len(trimmed)} chars")
 
-    # Step 2: narration
-    step("Generating ElevenLabs narration")
-    mp3_bytes, narration_duration = generate_narration(trimmed, voice_id=voice_id)
-    narration_path = cache_dir / "narration.mp3"
-    narration_path.write_bytes(mp3_bytes)
-    step(f"  narration: {len(mp3_bytes)} bytes, {narration_duration:.1f}s")
+    # ── Step 2: generate narration ──
+    # Avatar mode: HeyGen produces a video with lip-synced audio
+    # Audio-only mode: standalone ElevenLabs MP3
+    avatar_path = None
+    narration_path = None
+    narration_duration = 0.0
 
-    # Step 3: playlist
+    if use_avatar:
+        step("Generating HeyGen avatar video (this takes 2-5 minutes)")
+        from twdt_video_bot.heygen import generate_avatar_video
+        avatar_bytes = generate_avatar_video(trimmed)
+        avatar_path = cache_dir / "avatar.mp4"
+        avatar_path.write_bytes(avatar_bytes)
+        narration_duration = _probe_duration(avatar_path)
+        step(f"  avatar video: {len(avatar_bytes)} bytes, {narration_duration:.1f}s")
+    else:
+        step("Generating ElevenLabs narration (audio only)")
+        mp3_bytes, narration_duration = generate_narration(trimmed, voice_id=voice_id)
+        narration_path = cache_dir / "narration.mp3"
+        narration_path.write_bytes(mp3_bytes)
+        step(f"  narration: {len(mp3_bytes)} bytes, {narration_duration:.1f}s")
+
+    # ── Step 3: playlist ──
     step(f"Listing playlist (capped at {max_playlist})")
     entries = list_playlist(playlist_url, max_entries=max_playlist)
     if not entries:
         raise RuntimeError("Playlist returned no videos.")
     step(f"  {len(entries)} videos in playlist")
 
-    # Step 4: compute per-clip length
-    raw_clip_s = narration_duration / len(entries)
+    # ── Step 4: compute per-clip length ──
+    raw_clip_s = narration_duration / len(entries) if len(entries) > 0 else 30.0
     clip_length_s = max(MIN_CLIP_S, min(MAX_CLIP_S, raw_clip_s))
     step(f"  per-clip length: {clip_length_s:.1f}s  (raw {raw_clip_s:.1f}s)")
 
-    # Step 5: download clips
+    # ── Step 5: download clips ──
     clip_paths = []
     for i, entry in enumerate(entries, 1):
         step(f"  [{i}/{len(entries)}] downloading clip from {entry.title[:60]}")
-        # Don't start past the end of short videos
         start = clip_start_offset
         if entry.duration and start + clip_length_s > entry.duration - 2:
             start = max(0.0, entry.duration - clip_length_s - 2)
@@ -110,14 +154,21 @@ def build_recap(
         raise RuntimeError("No clips downloaded successfully.")
     step(f"  got {len(clip_paths)}/{len(entries)} clips")
 
-    # Step 6: concat to single video track
+    # ── Step 6: concat to single video track ──
     step("Concatenating clips to 720p")
     intermediate = cache_dir / "concat.mp4"
     concat_clips_to_target(clip_paths, intermediate)
 
-    # Step 7: overlay narration + final encode
-    step("Mixing narration onto clips (final encode)")
-    mix_narration(intermediate, narration_path, output_path, narration_duration_s=narration_duration)
+    # ── Step 7: final compose ──
+    if use_avatar and avatar_path:
+        step("Overlaying avatar onto clips (bottom-left 20%) + mixing audio")
+        overlay_avatar(intermediate, avatar_path, output_path)
+    else:
+        step("Mixing narration onto clips (final encode)")
+        mix_narration(
+            intermediate, narration_path, output_path,
+            narration_duration_s=narration_duration,
+        )
 
     total = time.time() - started
     step(f"Done: {output_path} ({total:.0f}s total)")
@@ -129,4 +180,5 @@ def build_recap(
         clip_count=len(clip_paths),
         clip_length_s=clip_length_s,
         total_seconds=total,
+        avatar=use_avatar,
     )

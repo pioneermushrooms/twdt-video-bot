@@ -153,3 +153,122 @@ def mix_narration(
             f"ffmpeg mix failed: {result.stderr[-600:]}"
         )
     return output_path
+
+
+def overlay_avatar(
+    video_path: Path,
+    avatar_path: Path,
+    output_path: Path,
+    avatar_fraction: float = 0.20,
+    background_db: float = -14.0,
+) -> Path:
+    """Overlay a talking-head avatar video onto the bottom-left corner of
+    the main video. The avatar's audio replaces the narration track (since
+    HeyGen already generates lip-synced narration). The main video's audio
+    is mixed in at background_db (~20%).
+
+    Args:
+        video_path: the concatenated game clips (720p, with game audio)
+        avatar_path: HeyGen's avatar MP4 (512x512 or similar, with narration audio)
+        output_path: final output MP4
+        avatar_fraction: how much of the main video's width the avatar takes
+                         up. 0.20 = 20% = bottom-left corner.
+        background_db: volume of the game audio behind the narration (-14 ≈ 20%)
+
+    Duration is clamped to the avatar video's length (= narration length).
+    """
+    video_path = Path(video_path)
+    avatar_path = Path(avatar_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Get avatar duration for the -t clamp
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(avatar_path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        avatar_duration = float(probe.stdout.strip())
+    except ValueError:
+        avatar_duration = 0.0
+
+    # Get main video dimensions for the overlay math
+    probe2 = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            str(video_path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        main_w, main_h = [int(x) for x in probe2.stdout.strip().split(",")]
+    except ValueError:
+        main_w, main_h = TARGET_W, TARGET_H
+
+    # Avatar target width = fraction of main video width
+    avatar_w = int(main_w * avatar_fraction)
+
+    # Check if main video is shorter than avatar — need to loop if so
+    probe3 = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(video_path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        video_duration = float(probe3.stdout.strip())
+    except ValueError:
+        video_duration = 0.0
+
+    need_loop = video_duration > 0 and video_duration < avatar_duration - 0.5
+
+    # Filter graph:
+    # [1:v] scale avatar to target width, maintain aspect → [avatar]
+    # [0:v][avatar] overlay at bottom-left → [vout]
+    # [0:a] game audio at background volume → [bg]
+    # [1:a] avatar narration at full volume → [narr]
+    # [bg][narr] amix → [aout]
+    filter_graph = (
+        f"[1:v]scale={avatar_w}:-1[avatar];"
+        f"[0:v][avatar]overlay=0:H-h[vout];"
+        f"[0:a]volume={background_db}dB[bg];"
+        f"[1:a]volume=0dB[narr];"
+        f"[bg][narr]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]"
+    )
+
+    cmd = ["ffmpeg", "-y"]
+    if need_loop:
+        cmd += ["-stream_loop", "-1"]
+    cmd += [
+        "-i", str(video_path),
+        "-i", str(avatar_path),
+        "-filter_complex", filter_graph,
+        "-map", "[vout]",
+        "-map", "[aout]",
+        "-t", f"{avatar_duration:.3f}",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", str(CRF),
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg overlay failed: {result.stderr[-600:]}"
+        )
+    return output_path

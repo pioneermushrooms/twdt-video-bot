@@ -24,15 +24,18 @@ def main():
     recap.add_argument("--cache", default=".cache", help="Cache dir for intermediate files")
     recap.add_argument("--voice", default=DEFAULT_VOICE_ID, help="ElevenLabs voice ID")
     recap.add_argument("--max-videos", type=int, default=12, help="Max playlist videos to use")
+    recap.add_argument("--no-avatar", action="store_true", help="Audio-only mode (no HeyGen avatar, uses standalone ElevenLabs)")
 
     args = parser.parse_args()
 
     if args.command == "recap":
         post_source = args.post or args.post_text
+        mode = "audio-only" if args.no_avatar else "avatar (HeyGen)"
         print(f"twdt-video-bot recap")
         print(f"  post:     {post_source[:80] if post_source else ''}")
         print(f"  playlist: {args.playlist}")
         print(f"  output:   {args.output}")
+        print(f"  mode:     {mode}")
         print()
         try:
             result = build_recap(
@@ -42,6 +45,7 @@ def main():
                 cache_dir=Path(args.cache),
                 voice_id=args.voice,
                 max_playlist=args.max_videos,
+                use_avatar=not args.no_avatar,
             )
         except Exception as e:
             print(f"FAILED: {e}", file=sys.stderr)
@@ -50,6 +54,7 @@ def main():
         print()
         print(f"Output:  {result.output_path}")
         print(f"Runtime: {result.total_seconds:.0f}s")
+        print(f"Avatar:  {'yes' if result.avatar else 'no'}")
         print(f"Narration: {result.narration_chars} chars / {result.narration_duration_s:.1f}s")
         print(f"Clips:   {result.clip_count} @ {result.clip_length_s:.1f}s each")
         return 0
