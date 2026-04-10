@@ -27,7 +27,13 @@ def main():
     recap.add_argument("--no-avatar", action="store_true", help="Audio-only mode (no HeyGen avatar, uses standalone ElevenLabs)")
     recap.add_argument("--avatar-file", default="", help="Path to a pre-rendered avatar MP4 (skips HeyGen API, $0 cost)")
 
+    sub.add_parser("wizard", help="Interactive step-by-step recap builder with prompts")
+
     args = parser.parse_args()
+
+    if args.command == "wizard":
+        from twdt_video_bot.wizard import run_wizard
+        return run_wizard()
 
     if args.command == "recap":
         post_source = args.post or args.post_text

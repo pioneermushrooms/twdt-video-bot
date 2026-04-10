@@ -126,7 +126,7 @@ def download_clip(
         *_JS_RUNTIME_ARGS,
         "--download-sections", section,
         "--force-keyframes-at-cuts",  # cleaner cuts at requested boundaries
-        "-f", "bestvideo[height<=720]+bestaudio/best[height<=720]",
+        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
         "--merge-output-format", "mp4",
         "-o", str(output_path),
         "--no-warnings",

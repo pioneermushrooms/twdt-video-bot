@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from twdt_video_bot.compose import concat_clips_to_target, mix_narration, overlay_avatar
+from twdt_video_bot.compose import apply_frame, concat_clips_to_target, crop_avatar, mix_narration, overlay_avatar
 from twdt_video_bot.forum import load_post
 from twdt_video_bot.narration import DEFAULT_VOICE_ID, generate_narration
 from twdt_video_bot.playlist import download_clip, list_playlist
@@ -112,9 +112,12 @@ def build_recap(
 
     if use_avatar and avatar_file:
         # Pre-rendered avatar file (from HeyGen web UI — $0, plan minutes)
-        avatar_path = Path(avatar_file)
-        if not avatar_path.exists():
-            raise RuntimeError(f"Avatar file not found: {avatar_path}")
+        raw_avatar = Path(avatar_file)
+        if not raw_avatar.exists():
+            raise RuntimeError(f"Avatar file not found: {raw_avatar}")
+        step(f"Cropping avatar to 800x900 portrait: {raw_avatar.name}")
+        avatar_path = cache_dir / "avatar_cropped.mp4"
+        crop_avatar(raw_avatar, avatar_path)
         narration_duration = _probe_duration(avatar_path)
         step(f"Using pre-rendered avatar: {avatar_path.name} ({narration_duration:.1f}s)")
     elif use_avatar:
@@ -167,20 +170,25 @@ def build_recap(
     step(f"  got {len(clip_paths)}/{len(entries)} clips")
 
     # ── Step 6: concat to single video track ──
-    step("Concatenating clips to 720p")
+    step("Concatenating clips to 1080p")
     intermediate = cache_dir / "concat.mp4"
     concat_clips_to_target(clip_paths, intermediate)
 
-    # ── Step 7: final compose ──
+    # ── Step 7: compose (avatar overlay or narration mix) ──
+    pre_frame = cache_dir / "pre_frame.mp4"
     if use_avatar and avatar_path:
         step("Overlaying avatar onto clips (bottom-left 20%) + mixing audio")
-        overlay_avatar(intermediate, avatar_path, output_path)
+        overlay_avatar(intermediate, avatar_path, pre_frame)
     else:
         step("Mixing narration onto clips (final encode)")
         mix_narration(
-            intermediate, narration_path, output_path,
+            intermediate, narration_path, pre_frame,
             narration_duration_s=narration_duration,
         )
+
+    # ── Step 8: apply decorative frame ──
+    step("Applying frame (gold border + vignette)")
+    apply_frame(pre_frame, output_path)
 
     total = time.time() - started
     step(f"Done: {output_path} ({total:.0f}s total)")

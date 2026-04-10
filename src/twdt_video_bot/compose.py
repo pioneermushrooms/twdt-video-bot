@@ -2,19 +2,95 @@
 
 Takes a list of pre-clipped video files and an MP3 narration, produces:
   - Concatenated video track from all clips (preserving original aspect)
-  - Scaled/cropped to 1280x720 letterboxed or cover
+  - Scaled/cropped to 1920x1080 letterboxed or cover
   - Audio track = narration at 100% mixed with the clips' audio at 20%
   - Output length = narration length (video is looped or truncated to match)
-  - Encoded at CRF 26, h264 yuv420p for Discord compatibility
+  - Encoded at CRF 23, h264 yuv420p for Discord compatibility
+  - Gold border frame + vignette for polished Discord embed look
 """
 
 import subprocess
 from pathlib import Path
 
 
-TARGET_W = 1280
-TARGET_H = 720
-CRF = 26
+TARGET_W = 1920
+TARGET_H = 1080
+CRF = 23
+
+# Avatar crop target — center-crop the 16:9 HeyGen output to portrait
+AVATAR_CROP_W = 800
+AVATAR_CROP_H = 900
+
+
+def crop_avatar(input_path: Path, output_path: Path) -> Path:
+    """Center-crop a 16:9 HeyGen video to 800x900 portrait."""
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vf", f"crop={AVATAR_CROP_W}:{AVATAR_CROP_H}",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", str(CRF),
+        "-c:a", "copy",
+        "-pix_fmt", "yuv420p",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg crop failed: {result.stderr[-600:]}")
+    return output_path
+
+
+def apply_frame(input_path: Path, output_path: Path) -> Path:
+    """Apply a cinematic frame to the final video for Discord presentation.
+
+    Adds: 4px gold outer border, 1px dark inner line, subtle vignette,
+    thin dark gradient bars at top/bottom for depth.
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Frame filter chain:
+    #   1. Outer gold border (4px) via drawbox
+    #   2. Inner dark border (1px) for depth
+    #   3. Vignette for cinematic edge darkening
+    #   4. Thin dark gradient bars top+bottom (letterbox feel)
+    border = 4
+    inner = border + 1
+    frame_filter = (
+        # Gold outer border
+        f"drawbox=x=0:y=0:w=iw:h=ih:t={border}:color=#B8962E@0.85,"
+        # Dark inner line
+        f"drawbox=x={border}:y={border}:w=iw-{border*2}:h=ih-{border*2}:t=1:color=#000000@0.5,"
+        # Subtle vignette — darkens edges naturally
+        "vignette=PI/5:1.2,"
+        # Top gradient bar (semi-transparent black, 30px)
+        f"drawbox=x={inner}:y={inner}:w=iw-{inner*2}:h=30:t=fill:color=#000000@0.3,"
+        # Bottom gradient bar
+        f"drawbox=x={inner}:y=ih-{inner}-30:w=iw-{inner*2}:h=30:t=fill:color=#000000@0.3"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vf", frame_filter,
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", str(CRF),
+        "-c:a", "copy",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg frame failed: {result.stderr[-600:]}")
+    return output_path
 
 
 def concat_clips_to_target(clip_paths: list[Path], intermediate_path: Path) -> Path:
