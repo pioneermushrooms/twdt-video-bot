@@ -20,9 +20,10 @@ import requests
 API_GENERATE = "https://api.heygen.com/v2/video/generate"
 API_STATUS = "https://api.heygen.com/v1/video_status.get"
 
-# Crazy Eddie — same voice used in the standalone narration path
-ELEVENLABS_VOICE_ID = "OTMqA7lryJHXgAnPIQYt"
-ELEVENLABS_MODEL = "eleven_multilingual_v2"
+# Crazy Eddie — HeyGen's internal voice ID (different from the ElevenLabs ID).
+# HeyGen maintains its own voice library; even if the voice originally came
+# from ElevenLabs, HeyGen assigns its own ID.
+HEYGEN_VOICE_ID = "32f7653b4e8f4e33b9369263e9f9a434"
 
 
 def _load_env():
@@ -54,7 +55,7 @@ def _get(var: str) -> str:
 def generate_avatar_video(
     script_text: str,
     avatar_id: str = "",
-    voice_id: str = ELEVENLABS_VOICE_ID,
+    voice_id: str = HEYGEN_VOICE_ID,
     background_color: str = "#00FF00",  # green screen default
     poll_interval_s: float = 5.0,
     poll_timeout_s: float = 600.0,
@@ -98,12 +99,6 @@ def generate_avatar_video(
                     "input_text": script_text,
                     "speed": 1,
                     "pitch": 0,
-                    "elevenlabs_settings": {
-                        "model": ELEVENLABS_MODEL,
-                        "similarity_boost": 0.85,
-                        "stability": 0.45,
-                        "style": 0.35,
-                    },
                 },
                 "background": {
                     "type": "color",
