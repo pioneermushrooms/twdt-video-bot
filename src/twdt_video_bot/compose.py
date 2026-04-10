@@ -31,8 +31,11 @@ def concat_clips_to_target(clip_paths: list[Path], intermediate_path: Path) -> P
     for clip in clip_paths:
         inputs += ["-i", str(clip)]
 
-    # Per-clip filter: scale to fit target box, pad to exact target dims
+    # Per-clip filter: crop center 50% (zoom in) → scale to target → pad
+    # The crop removes the outer 25% on each side, making the action fill
+    # the frame. Then scale to target dims with letterbox padding.
     scale_pad = (
+        f"crop=iw/2:ih/2:iw/4:ih/4,"
         f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
         f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     )

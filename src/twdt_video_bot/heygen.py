@@ -85,9 +85,12 @@ def generate_avatar_video(
         "video_inputs": [
             {
                 "character": {
-                    "type": "avatar",
-                    "avatar_id": avatar_id,
+                    "type": "talking_photo",
+                    "talking_photo_id": avatar_id,
                     "scale": 1,
+                    "talking_photo_style": "circle",
+                    "talking_style": "stable",
+                    "expression": "default",
                 },
                 "voice": {
                     "type": "text",
