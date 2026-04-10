@@ -65,6 +65,7 @@ def build_recap(
     max_playlist: int = MAX_PLAYLIST_ENTRIES,
     clip_start_offset: float = CLIP_START_OFFSET_S,
     use_avatar: bool = True,
+    avatar_file: str = "",
     on_progress=None,
 ) -> RecapResult:
     """Run the full pipeline.
@@ -73,8 +74,12 @@ def build_recap(
     playlist_url: YouTube playlist URL
     output_path: final MP4 path
     cache_dir: directory for temporary clips + intermediate video
-    use_avatar: if True, generate a HeyGen avatar video (default).
+    use_avatar: if True, use an avatar overlay (HeyGen API or local file).
                 if False, use standalone ElevenLabs narration only.
+    avatar_file: path to a pre-rendered avatar MP4 (e.g. downloaded from
+                 HeyGen's web UI). Skips the HeyGen API call entirely.
+                 Use this to avoid API credit costs — render in the web UI
+                 with plan minutes ($0), download, pass the file here.
     """
     started = time.time()
     output_path = Path(output_path)
@@ -105,7 +110,14 @@ def build_recap(
     narration_path = None
     narration_duration = 0.0
 
-    if use_avatar:
+    if use_avatar and avatar_file:
+        # Pre-rendered avatar file (from HeyGen web UI — $0, plan minutes)
+        avatar_path = Path(avatar_file)
+        if not avatar_path.exists():
+            raise RuntimeError(f"Avatar file not found: {avatar_path}")
+        narration_duration = _probe_duration(avatar_path)
+        step(f"Using pre-rendered avatar: {avatar_path.name} ({narration_duration:.1f}s)")
+    elif use_avatar:
         step("Generating HeyGen avatar video (this takes 2-5 minutes)")
         from twdt_video_bot.heygen import generate_avatar_video
         avatar_bytes = generate_avatar_video(trimmed)

@@ -25,6 +25,7 @@ def main():
     recap.add_argument("--voice", default=DEFAULT_VOICE_ID, help="ElevenLabs voice ID")
     recap.add_argument("--max-videos", type=int, default=12, help="Max playlist videos to use")
     recap.add_argument("--no-avatar", action="store_true", help="Audio-only mode (no HeyGen avatar, uses standalone ElevenLabs)")
+    recap.add_argument("--avatar-file", default="", help="Path to a pre-rendered avatar MP4 (skips HeyGen API, $0 cost)")
 
     args = parser.parse_args()
 
@@ -46,6 +47,7 @@ def main():
                 voice_id=args.voice,
                 max_playlist=args.max_videos,
                 use_avatar=not args.no_avatar,
+                avatar_file=args.avatar_file,
             )
         except Exception as e:
             print(f"FAILED: {e}", file=sys.stderr)
