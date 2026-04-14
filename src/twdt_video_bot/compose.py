@@ -22,20 +22,56 @@ AVATAR_CROP_W = 800
 AVATAR_CROP_H = 900
 
 
-def crop_avatar(input_path: Path, output_path: Path) -> Path:
-    """Center-crop a 16:9 HeyGen video to 800x900 portrait."""
+def crop_avatar(input_path: Path, output_path: Path, speed: float = 1.3) -> Path:
+    """Prepare a HeyGen avatar video for overlay.
+
+    - 16:9 input: center-crop to 800x900 portrait (API output)
+    - 9:16 input: crop center square, scale down (web UI phone format)
+    - Speeds up video/audio by `speed` factor (default 1.3x)
+    """
     input_path = Path(input_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Probe input dimensions to pick the right filter
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            str(input_path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        w, h = [int(x) for x in probe.stdout.strip().split(",")]
+    except ValueError:
+        w, h = 0, 0
+
+    if h > w:
+        # Portrait (9:16 from web UI) — crop center square, then scale down
+        vf = f"crop={w}:{w}:0:({h}-{w})/2,scale={AVATAR_CROP_W}:-2"
+    else:
+        # Landscape (16:9 from API) — center-crop to portrait
+        vf = f"crop={AVATAR_CROP_W}:{AVATAR_CROP_H}"
+
+    # Speed up video
+    if speed != 1.0:
+        vf += f",setpts=PTS/{speed}"
+
+    af = f"atempo={speed}" if speed != 1.0 else "acopy"
+
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
-        "-vf", f"crop={AVATAR_CROP_W}:{AVATAR_CROP_H}",
+        "-vf", vf,
+        "-af", af,
         "-c:v", "libx264",
         "-preset", "medium",
         "-crf", str(CRF),
-        "-c:a", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
@@ -90,6 +126,61 @@ def apply_frame(input_path: Path, output_path: Path) -> Path:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg frame failed: {result.stderr[-600:]}")
+    return output_path
+
+
+def overlay_credits(
+    video_path: Path,
+    output_path: Path,
+    show_s: float = 6.0,
+    fade_s: float = 1.0,
+) -> Path:
+    """Overlay credits text in the top-right corner for the first few seconds.
+
+    Text fades in at the start and fades out after show_s seconds.
+    """
+    video_path = Path(video_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    font_file = r"C\:/Windows/Fonts/arial.ttf"
+    # Each line: (text, fontsize, y_offset from top-right anchor)
+    lines = [
+        ("TWDT Season 32 - Week 7 Recap", 24, 20),
+        (r"Writing\: Lee", 18, 52),
+        (r"Recording\: Dameon Angell", 18, 74),
+        (r"Production\: Dare", 18, 96),
+    ]
+
+    # Fade: alpha goes 0→1 over fade_s, holds, then 1→0
+    fade_in = f"if(lt(t,{fade_s}),t/{fade_s},if(lt(t,{show_s - fade_s}),1,({show_s}-t)/{fade_s}))"
+
+    drawtext_parts = []
+    for text, size, y_off in lines:
+        drawtext_parts.append(
+            f"drawtext=text='{text}':fontsize={size}"
+            f":fontcolor=white:fontfile='{font_file}'"
+            f":x=w-text_w-20:y={y_off}"
+            f":alpha='{fade_in}'"
+        )
+
+    vf = ",".join(drawtext_parts)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", str(CRF),
+        "-c:a", "copy",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg credits overlay failed: {result.stderr[-600:]}")
     return output_path
 
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ELEVEN_LIMIT = 5000
-TARGET = 4500  # leave 500-char safety margin
+TARGET = 5000  # pass through if already under the HeyGen/ElevenLabs limit
 
 
 def _api_key() -> str:

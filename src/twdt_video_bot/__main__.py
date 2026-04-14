@@ -26,6 +26,7 @@ def main():
     recap.add_argument("--max-videos", type=int, default=12, help="Max playlist videos to use")
     recap.add_argument("--no-avatar", action="store_true", help="Audio-only mode (no HeyGen avatar, uses standalone ElevenLabs)")
     recap.add_argument("--avatar-file", default="", help="Path to a pre-rendered avatar MP4 (skips HeyGen API, $0 cost)")
+    recap.add_argument("--no-frame", action="store_true", help="Skip the gold border + vignette frame")
 
     sub.add_parser("wizard", help="Interactive step-by-step recap builder with prompts")
 
@@ -54,6 +55,7 @@ def main():
                 max_playlist=args.max_videos,
                 use_avatar=not args.no_avatar,
                 avatar_file=args.avatar_file,
+                use_frame=not args.no_frame,
             )
         except Exception as e:
             print(f"FAILED: {e}", file=sys.stderr)

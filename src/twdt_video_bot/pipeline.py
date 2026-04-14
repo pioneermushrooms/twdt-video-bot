@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from twdt_video_bot.compose import apply_frame, concat_clips_to_target, crop_avatar, mix_narration, overlay_avatar
+from twdt_video_bot.compose import apply_frame, concat_clips_to_target, crop_avatar, mix_narration, overlay_avatar, overlay_credits
 from twdt_video_bot.forum import load_post
 from twdt_video_bot.narration import DEFAULT_VOICE_ID, generate_narration
 from twdt_video_bot.playlist import download_clip, list_playlist
@@ -66,6 +66,7 @@ def build_recap(
     clip_start_offset: float = CLIP_START_OFFSET_S,
     use_avatar: bool = True,
     avatar_file: str = "",
+    use_frame: bool = True,
     on_progress=None,
 ) -> RecapResult:
     """Run the full pipeline.
@@ -186,9 +187,19 @@ def build_recap(
             narration_duration_s=narration_duration,
         )
 
-    # ── Step 8: apply decorative frame ──
-    step("Applying frame (gold border + vignette)")
-    apply_frame(pre_frame, output_path)
+    # ── Step 8: overlay credits ──
+    step("Overlaying credits (top-right, first 6s)")
+    credited = cache_dir / "credited.mp4"
+    overlay_credits(pre_frame, credited)
+
+    # ── Step 9: apply decorative frame ──
+    if use_frame:
+        step("Applying frame (gold border + vignette)")
+        apply_frame(credited, output_path)
+    else:
+        step("Skipping frame (--no-frame)")
+        import shutil
+        shutil.copy2(credited, output_path)
 
     total = time.time() - started
     step(f"Done: {output_path} ({total:.0f}s total)")

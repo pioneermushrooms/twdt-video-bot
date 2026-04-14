@@ -95,7 +95,7 @@ def generate_avatar_video(
                     "type": "text",
                     "voice_id": voice_id,
                     "input_text": script_text,
-                    "speed": 1,
+                    "speed": 1.5,
                     "pitch": 0,
                 },
                 "background": {

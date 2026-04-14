@@ -1,11 +1,14 @@
-"""Trench Wars forum scraper — extracts the OP (first post) from a thread URL.
+"""Source loader — fetches recap text from a URL, local file, or raw string.
 
-The TWDT forum runs on vBulletin 5. Each post's body is wrapped in a div with
-class js-post__content-text. The first match in document order is the OP.
+Supports:
+  - Local .txt files (preferred — just plain text, no parsing needed)
+  - Forum thread URLs (vBulletin 5 — legacy, scrapes js-post__content-text div)
+  - Raw pasted text
 """
 
 import re
 from html import unescape
+from pathlib import Path
 
 import requests
 
@@ -49,9 +52,15 @@ def fetch_op_text(url: str, timeout: int = 20) -> str:
 def load_post(source: str) -> str:
     """Resolve a 'post source' into text.
 
-    If source looks like a URL, scrape it. Otherwise treat it as raw text
-    (the user pasted the post directly).
+    Accepts a local file path (.txt), a URL (forum scrape), or raw text.
     """
+    # Local file
+    p = Path(source)
+    if p.suffix in (".txt",) and p.exists():
+        return p.read_text(encoding="utf-8").strip()
+
+    # URL
     if source.startswith(("http://", "https://")):
         return fetch_op_text(source)
+
     return source.strip()
